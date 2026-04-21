@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 import glob
+import os
 import modeles.modele_lineaire as ml
 
 
@@ -33,7 +34,7 @@ def load_images_from_folder(folder_path):
     
     return np.array(X_train), np.array(y_train), np.array(X_test), np.array(y_test)
 
-
+# Chargement + normalisation
 X_train, y_train, X_test, y_test = load_images_from_folder("IMAGES/GROUPS")
 
 X_train = X_train.reshape(X_train.shape[0], 784)
@@ -45,3 +46,20 @@ X_test = X_test / 255.0
 
 print("Taille de X_train :", X_train.shape)
 print("Taille de X_test :", X_test.shape)
+
+# on veut une sortie de label sous la forme de vecteur
+
+def vector_label(y, n_classes=10):
+    vectors = np.zeros((y.size, n_classes))
+    vectors[np.arange(y.size), y] = 1
+    return vectors
+
+
+# Entraînement des données avec le modèle linéaire
+
+Y_train = vector_label(y_train)
+
+A, b = ml.matrices(784, 10)
+learning_rate = 0.1
+iterations = 1000
+
