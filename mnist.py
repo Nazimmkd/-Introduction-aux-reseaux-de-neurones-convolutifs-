@@ -63,3 +63,18 @@ A, b = ml.matrices(784, 10)
 learning_rate = 0.1
 iterations = 1000
 
+
+def gradient_descent(X, Y, A, b, learning_rate):
+    m = X.shape[1]
+    
+    Z = ml.fonction_score(X, A, b)
+    A_pred = ml.softmax(Z)
+    
+    dZ = A_pred - Y
+    dA = np.dot(dZ, X.T) / m
+    db = np.sum(dZ, axis=1, keepdims=True) / m
+    
+    A -= learning_rate * dA
+    b -= learning_rate * db
+    
+    return A, b
