@@ -64,17 +64,12 @@ learning_rate = 0.1
 iterations = 1000
 
 
-def gradient_descent(X, Y, A, b, learning_rate):
-    m = X.shape[1]
-    
-    Z = ml.fonction_score(X, A, b)
-    A_pred = ml.softmax(Z)
-    
-    dZ = A_pred - Y
-    dA = np.dot(dZ, X.T) / m
-    db = np.sum(dZ, axis=1, keepdims=True) / m
-    
-    A -= learning_rate * dA
-    b -= learning_rate * db
-    
-    return A, b
+for i in range(iterations):
+    fonction_score = ml.fonction_score(X_train, A, b)
+    P = ml.softmax(fonction_score)
+    erreur = ml.log_loss(Y_train, P)
+    dA, db = ml.gradient(X_train, Y_train.T, P)
+
+    A = A -  learning_rate * dA
+    b = b - learning_rate * db 
+
