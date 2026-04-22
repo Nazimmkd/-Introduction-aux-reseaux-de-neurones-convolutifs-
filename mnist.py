@@ -14,9 +14,16 @@ def load_images_from_folder(folder_path):
         img = np.array(Image.open(img_path).convert('L'))
         filename = os.path.basename(img_path)
         
-        if '-' in filename:
-            label = int(filename.split('-')[1].split('_')[0])
-        else:
+        # Extraire le label : cherche "TRAIN-0" ou "-5" etc
+        label = None
+        for part in filename.split('-'):
+            # Cherche un nombre d'un seul chiffre (0-9)
+            num_str = part.split('_')[0]
+            if num_str.isdigit() and 0 <= int(num_str) <= 9:
+                label = int(num_str)
+                break
+        
+        if label is None:
             continue
             
         
@@ -25,10 +32,10 @@ def load_images_from_folder(folder_path):
                 sub_img = img[y:y+28, x:x+28] # On découpe du 28x28 
                 
                 if sub_img.shape == (28, 28):
-                    if 'TRAIN' in filename.upper() or '30000' in filename:
+                    if 'TRAIN' in filename.upper():
                         X_train.append(sub_img.flatten())
                         y_train.append(label)
-                    elif 'TESTS' in filename.upper() or '40000' in filename:
+                    elif 'TESTS' in filename.upper():
                         X_test.append(sub_img.flatten())
                         y_test.append(label)
     
@@ -43,6 +50,9 @@ X_test = X_test.reshape(X_test.shape[0], 784)
 X_train = X_train / 255.0
 X_test = X_test / 255.0 
 
+# Transposer pour avoir (n_features, n_samples)
+X_train = X_train.T
+X_test = X_test.T
 
 print("Taille de X_train :", X_train.shape)
 print("Taille de X_test :", X_test.shape)
@@ -50,8 +60,8 @@ print("Taille de X_test :", X_test.shape)
 # on veut une sortie de label sous la forme de vecteur
 
 def vector_label(y, n_classes=10):
-    vectors = np.zeros((y.size, n_classes))
-    vectors[np.arange(y.size), y] = 1
+    vectors = np.zeros((n_classes, y.size))
+    vectors[y, np.arange(y.size)] = 1
     return vectors
 
 
@@ -65,11 +75,16 @@ iterations = 1000
 
 
 for i in range(iterations):
-    fonction_score = ml.fonction_score(X_train, A, b)
-    P = ml.softmax(fonction_score)
+    Z = ml.fonction_score(X_train, A, b)
+    P = ml.softmax(Z)
     erreur = ml.log_loss(Y_train, P)
-    dA, db = ml.gradient(X_train, Y_train.T, P)
+    dA, db = ml.gradient(X_train, Y_train, P)
 
-    A = A -  learning_rate * dA
-    b = b - learning_rate * db 
+    A = A - learning_rate * dA
+    b = b - learning_rate * db
+    
+    if (i + 1) % 100 == 0:
+        print(f"Iteration {i + 1}/{iterations}, Erreur: {erreur:.4f}")
+    
 
+# Entrainement des données avec le modèle à couches cachées
