@@ -10,3 +10,5 @@ def derivee_sigmoid(x):
 def softmax(x):
     exp_x = np.exp(x - np.max(x, axis=0, keepdims=True))  
     return exp_x / np.sum(exp_x, axis=0, keepdims=True)
+
+    

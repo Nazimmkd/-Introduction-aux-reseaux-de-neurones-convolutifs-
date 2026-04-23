@@ -4,7 +4,7 @@ from PIL import Image
 import glob
 import os
 import modeles.modele_lineaire as ml
-
+import modeles.modele_couches_cachées as mcc
 
 def load_images_from_folder(folder_path):
     X_train, y_train, X_test, y_test = [], [], [], []
@@ -88,3 +88,5 @@ for i in range(iterations):
     
 
 # Entrainement des données avec le modèle à couches cachées
+
+
