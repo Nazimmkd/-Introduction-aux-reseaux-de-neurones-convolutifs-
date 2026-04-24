@@ -90,3 +90,25 @@ for i in range(iterations):
 # Entrainement des données avec le modèle à couches cachées
 
 
+n_h = 16
+initial_params = mcc.initialisation_mlp(784, n_h, 10)
+learning_rate = 0.1 
+iterations = 1000
+for i in range(iterations):
+    # 1. Forward Pass
+    aller = mcc.forward_pass(X_train, initial_params)
+    
+    # 2. Calcul du coût (toujours la Log Loss avec cache["A2"])
+    erreur = ml.log_loss(Y_train, aller["A2"])
+    
+    # 3. Backpropagation
+    retour = mcc.backpropagation(X_train, Y_train, aller, initial_params)
+    
+    # 4. Mise à jour de TOUTES les matrices
+    initial_params["W1"] -= learning_rate * retour["dW1"]
+    initial_params["b1"] -= learning_rate * retour["db1"]
+    initial_params["W2"] -= learning_rate * retour["dW2"]
+    initial_params["b2"] -= learning_rate * retour["db2"]
+
+    if i % 20 == 0:
+        print(f"Époque {i}")
