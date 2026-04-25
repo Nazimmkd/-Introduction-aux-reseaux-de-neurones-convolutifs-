@@ -18,10 +18,8 @@ def softmax(Z):
     return exp_Z / np.sum(exp_Z, axis=0, keepdims=True)
 
 def log_loss(Y, P):
-   
     n = Y.shape[1]
-   
-    loss = - 1 / n * np.sum(Y * np.log(P)) 
+    loss = - 1 / n * np.sum(Y * np.log(P + 1e-15))
     return loss
 
 def gradient(X, Y, P):
