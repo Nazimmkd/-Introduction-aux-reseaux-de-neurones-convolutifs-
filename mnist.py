@@ -113,12 +113,12 @@ def train_model(X, Y, model_type="linear", n_h1=64, n_h2=None, lr=0.1, iters=100
         history.append(loss)
 
         if (i + 1) % 10 == 0:
-            print(f"[{model_type.upper()}] Epoque {i + 1}/{iters}, Erreur: {loss:.4f}")
+            print(f"[{model_type.upper()}] itération {i + 1}/{iters}, Erreur: {loss:.4f}")
 
     return params, history
 
 
-def analyze_errors(X, y, params, model_type="linear", n_h2=False):
+def analyze_errors(X, y, params, model_type="linear", n_h2=False, ensemble="TEST"):
     if model_type == "linear":
         Z = ml.fonction_score(X, params[0], params[1])
         scores = ml.softmax(Z)
@@ -133,17 +133,26 @@ def analyze_errors(X, y, params, model_type="linear", n_h2=False):
     accuracy = np.mean(predictions == y)
 
     label = f"[MODELE {model_type.upper()} {('H=2' if n_h2 else 'H=1') if model_type == 'mlp' else ''}]"
-    print(f"\n{label} (Ensemble TEST)")
+    print(f"\n{label} (Ensemble {ensemble})")
     print(f"Precision: {accuracy * 100:.2f}%")
     print(f"Nombre d'erreurs: {len(error_indices)} ({len(error_indices) / len(y) * 100:.2f}%)")
     print(f"Predictions correctes: {len(y) - len(error_indices)} ({(1 - len(error_indices) / len(y)) * 100:.2f}%)")
 
-    if len(error_indices) > 0:
+    if len(error_indices) > 0 and ensemble == "TEST":
         print("\nExemples d'erreurs:")
         for i in error_indices[:5]:
             print(f"  Indice {i}: Vraie classe={y[i]}, Prediction={predictions[i]}, Confiance={probs[i] * 100:.2f}%")
 
     return predictions, accuracy
+
+
+def nb_parametres(model_type, n_h1=64, n_h2=None):
+    if model_type == "linear":
+        return 784 * 10 + 10
+    elif n_h2 is None:
+        return 784 * n_h1 + n_h1 + n_h1 * 10 + 10
+    else:
+        return 784 * n_h1 + n_h1 + n_h1 * n_h2 + n_h2 + n_h2 * 10 + 10
 
 
 def visualiser_exemples(X_train, y_train):
@@ -172,6 +181,21 @@ def visualiser_erreurs(X_test, y_test, predictions, model_name="MLP"):
     plt.show()
 
 
+# chiffres ambigus mal classes par les 3 modeles
+def visualiser_erreurs_communes(X_test, y_test, pred_lin, pred_h1, pred_h2):
+    communes = np.where((pred_lin != y_test) & (pred_h1 != y_test) & (pred_h2 != y_test))[0]
+    print(f"\nChiffres mal classes par les 3 modeles : {len(communes)}")
+    fig, axes = plt.subplots(2, 5, figsize=(12, 5))
+    fig.suptitle("Chiffres ambigus (mal classes par les 3 modeles)", fontsize=13)
+    for i, idx in enumerate(communes[:10]):
+        ax = axes[i // 5][i % 5]
+        ax.imshow(X_test[:, idx].reshape(28, 28), cmap='gray')
+        ax.set_title(f"Vrai:{y_test[idx]}\nL:{pred_lin[idx]} H1:{pred_h1[idx]} H2:{pred_h2[idx]}", fontsize=7)
+        ax.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+
 X_train, y_train, X_test, y_test = load_mnist_data()
 
 print(f"X_train: {X_train.shape}, X_test: {X_test.shape}")
@@ -187,6 +211,14 @@ params_lin, hist_lin = train_model(X_train, Y_train, "linear", lr=0.1, iters=100
 params_h1,  hist_h1  = train_model(X_train, Y_train, "mlp", n_h1=64, lr=0.1, iters=100, batch_size=256)
 params_h2,  hist_h2  = train_model(X_train, Y_train, "mlp", n_h1=64, n_h2=32, lr=0.1, iters=100, batch_size=256)
 
+# évaluation sur le TRAIN
+print("\n" + "=" * 60)
+print("EVALUATION SUR LE TRAIN")
+print("=" * 60)
+pred_lin_train, acc_lin_train = analyze_errors(X_train, y_train, params_lin, "linear", ensemble="TRAIN")
+pred_h1_train,  acc_h1_train  = analyze_errors(X_train, y_train, params_h1,  "mlp",    ensemble="TRAIN")
+pred_h2_train,  acc_h2_train  = analyze_errors(X_train, y_train, params_h2,  "mlp", n_h2=True, ensemble="TRAIN")
+
 print("\n" + "=" * 60)
 print("EVALUATION ET ANALYSE DES ERREURS DE CLASSIFICATION")
 print("=" * 60)
@@ -195,19 +227,26 @@ pred_lin, acc_lin = analyze_errors(X_test, y_test, params_lin, "linear")
 pred_h1,  acc_h1  = analyze_errors(X_test, y_test, params_h1,  "mlp")
 pred_h2,  acc_h2  = analyze_errors(X_test, y_test, params_h2,  "mlp", n_h2=True)
 
-print("\n" + "=" * 60)
-print(f"{'Modele':<20} {'Precision Test':>15}")
-print("-" * 40)
-print(f"{'Lineaire':<20} {acc_lin * 100:>14.2f}%")
-print(f"{'MLP H=1':<20} {acc_h1  * 100:>14.2f}%")
-print(f"{'MLP H=2':<20} {acc_h2  * 100:>14.2f}%")
+#  tableau complet avec nb params + train + test
+print("\n" + "=" * 70)
+print(f"{'Modele':<20} {'Nb params':>10} {'Err. Train':>12} {'Err. Test':>12}")
+print("-" * 70)
+print(f"{'Lineaire':<20} {nb_parametres('linear'):>10} {(1-acc_lin_train)*100:>11.2f}% {(1-acc_lin)*100:>11.2f}%")
+print(f"{'MLP H=1':<20} {nb_parametres('mlp',64):>10} {(1-acc_h1_train)*100:>11.2f}% {(1-acc_h1)*100:>11.2f}%")
+print(f"{'MLP H=2':<20} {nb_parametres('mlp',64,32):>10} {(1-acc_h2_train)*100:>11.2f}% {(1-acc_h2)*100:>11.2f}%")
+print("=" * 70)
 
+visualiser_erreurs(X_test, y_test, pred_lin, "Modele Lineaire")
 visualiser_erreurs(X_test, y_test, pred_h1, "MLP H=1")
+visualiser_erreurs(X_test, y_test, pred_h2, "MLP H=2")
 
-print("\nCalcul de la PCA en cours...")
-pca = PCA(n_components=2)
-pca.fit(X_train.T)
-X_test_2d = pca.transform(X_test.T)
+
+visualiser_erreurs_communes(X_test, y_test, pred_lin, pred_h1, pred_h2)
+
+
+acp = PCA(n_components=2)
+acp.fit(X_train.T)
+X_test_2d = acp.transform(X_test.T)
 
 plt.figure(figsize=(12, 5))
 
@@ -223,7 +262,7 @@ plt.grid(True)
 
 plt.subplot(1, 2, 2)
 scatter = plt.scatter(X_test_2d[:, 0], X_test_2d[:, 1], c=y_test, cmap='tab10', s=5, alpha=0.5)
-plt.title("Visualisation PCA des chiffres")
+plt.title("Visualisation ACP des chiffres")
 plt.xlabel("Composante 1")
 plt.ylabel("Composante 2")
 plt.colorbar(scatter, label="Classes (0-9)")
