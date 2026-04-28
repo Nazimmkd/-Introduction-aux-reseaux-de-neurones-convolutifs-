@@ -198,10 +198,6 @@ def visualiser_erreurs_communes(X_test, y_test, pred_lin, pred_h1, pred_h2):
 
 X_train, y_train, X_test, y_test = load_mnist_data()
 
-print(f"X_train: {X_train.shape}, X_test: {X_test.shape}")
-print(f"Labels uniques: {np.unique(y_train)}")
-print(f"Distribution: {np.bincount(y_train)}")
-
 visualiser_exemples(X_train, y_train)
 
 Y_train = vector_label(y_train)
@@ -248,9 +244,8 @@ acp = PCA(n_components=2)
 acp.fit(X_train.T)
 X_test_2d = acp.transform(X_test.T)
 
-plt.figure(figsize=(12, 5))
-
-plt.subplot(1, 2, 1)
+#  Convergence
+plt.figure(figsize=(10, 6))
 plt.plot(hist_lin, label="Lineaire")
 plt.plot(hist_h1,  label="MLP H=1")
 plt.plot(hist_h2,  label="MLP H=2")
@@ -259,14 +254,16 @@ plt.xlabel("Epoques")
 plt.ylabel("Erreur (Log Loss)")
 plt.legend()
 plt.grid(True)
+plt.tight_layout()
+plt.show()
 
-plt.subplot(1, 2, 2)
+# ACP
+plt.figure(figsize=(10, 8))
 scatter = plt.scatter(X_test_2d[:, 0], X_test_2d[:, 1], c=y_test, cmap='tab10', s=5, alpha=0.5)
 plt.title("Visualisation ACP des chiffres")
 plt.xlabel("Composante 1")
 plt.ylabel("Composante 2")
 plt.colorbar(scatter, label="Classes (0-9)")
 plt.grid(True)
-
 plt.tight_layout()
 plt.show()

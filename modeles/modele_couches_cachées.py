@@ -14,9 +14,9 @@ def softmax(x):
 def initialisation_mlp(n_x, n_h, n_y, n_h2=None):
     if n_h2 is None:
         # H = 1
-        W1 = np.random.randn(n_h, n_x) * np.sqrt(1 / n_x)  # <-- Xavier
+        W1 = np.random.randn(n_h, n_x) * np.sqrt(1 / n_x) 
         b1 = np.zeros((n_h, 1))
-        W2 = np.random.randn(n_y, n_h) * np.sqrt(1 / n_h)  # <-- Xavier
+        W2 = np.random.randn(n_y, n_h) * np.sqrt(1 / n_h)  
         b2 = np.zeros((n_y, 1))
         return {"W1": W1, "b1": b1, "W2": W2, "b2": b2}
     else:
@@ -29,7 +29,7 @@ def initialisation_mlp(n_x, n_h, n_y, n_h2=None):
         b3 = np.zeros((n_y, 1))
         return {"W1": W1, "b1": b1, "W2": W2, "b2": b2, "W3": W3, "b3": b3}
 def forward_pass(X, params):
-    """Forward pass pour MLP avec H=1 ou H=2"""
+    
     # Couche 1 (cachée)
     Z1 = np.dot(params["W1"], X) + params["b1"]
     A1 = sigmoid(Z1)
