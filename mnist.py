@@ -255,6 +255,7 @@ plt.ylabel("Erreur (Log Loss)")
 plt.legend()
 plt.grid(True)
 plt.tight_layout()
+plt.savefig("mnist_convergence.png", dpi=300, bbox_inches='tight')
 plt.show()
 
 # ACP
@@ -266,4 +267,5 @@ plt.ylabel("Composante 2")
 plt.colorbar(scatter, label="Classes (0-9)")
 plt.grid(True)
 plt.tight_layout()
+plt.savefig("mnist_acp.png", dpi=300, bbox_inches='tight')
 plt.show()

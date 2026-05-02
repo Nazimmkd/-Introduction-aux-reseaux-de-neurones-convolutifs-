@@ -1,0 +1,265 @@
+\documentclass[a4paper,10pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+
+\geometry{margin=2cm}
+
+\title{\textbf{De la classification des chiffres manuscrits
+à la détection de cancers du sein}\
+\large Projet de Machine Learning \\
+Rapport combiné : MNIST et CIFAR-10}
+\author{Nazim Mekideche \\ Armand Lauener \\ Mohamed Ouadihi \\ Macéo Pierson}
+\date{Mai 2026}
+
+\begin{document}
+
+\maketitle
+
+% ============================================================
+\section{Introduction : Présentation des jeux de données}
+% ============================================================
+
+La première partie de ce projet porte sur la base de données MNIST, composée d'images de chiffres manuscrits de taille $28 \times 28$ pixels.
+Chaque image est représentée par un vecteur $\vec{x} \in \mathbb{R}^{784}$ dont les coordonnées correspondent aux intensités des pixels normalisées dans $[0,1]$.
+
+L'ensemble d'entraînement MNIST contient $60\,000$ exemples et l'ensemble de test $10\,000$ exemples, répartis équitablement entre les 10 classes allant de 0 à 9.
+
+La deuxième partie s'intéresse à CIFAR-10, un jeu de données plus difficile composé d'images couleur $32 \times 32$ pixels.
+Chaque image est représentée par un tenseur $\mathbf{x} \in \mathbb{R}^{32 \times 32 \times 3}$, soit $3\,072$ valeurs après aplatissage.
+L'ensemble d'entraînement CIFAR-10 contient $50\,000$ exemples et l'ensemble de test $10\,000$ exemples, répartis sur 10 classes d'objets naturels.
+
+% ============================================================
+\section{Modèles de classification : MNIST}
+% ============================================================
+
+\subsection{Modèle linéaire}
+
+Le modèle linéaire calcule pour chaque entrée $\vec{x}$ un vecteur de scores
+$o = A \vec{x} + b$, où $A \in \mathbb{R}^{10 \times 784}$ et $\vec{b} \in \mathbb{R}^{10}$.
+Ces scores sont transformés en probabilités par la fonction softmax :
+\[
+P_k(\vec{x}) = \frac{e^{o_k}}{\sum_{j=0}^{9} e^{o_j}}.
+\]
+La prédiction est $\hat{y} = \arg\max_k P_k(\vec{x})$.
+Ce modèle comporte $784 \times 10 + 10 = 7\,850$ paramètres.
+
+\subsection{Modèle MLP à une couche cachée (H=1)}
+
+On ajoute une couche cachée de $p_1 = 64$ neurones avec activation sigmoïde :
+\[
+z^1_q = \sigma\!\left(\sum_{k=1}^{784} a^1_{qk} x_k + a^1_q\right), \qquad
+o_k = \sum_{q=1}^{64} a^2_{kq} z^1_q + a^2_k.
+\]
+La sortie passe ensuite par softmax.
+Ce modèle comporte
+$784 \times 64 + 64 + 64 \times 10 + 10 = \mathbf{50\,890}$ paramètres.
+
+\subsection{Modèle MLP à deux couches cachées (H=2)}
+
+Une deuxième couche cachée de $p_2 = 32$ neurones est ajoutée :
+\[
+z^2_q = \sigma\!\left(\sum_{k=1}^{64} a^2_{qk} z^1_k + a^2_q\right), \qquad
+o_k = \sum_{q=1}^{32} a^3_{kq} z^2_q + a^3_k.
+\]
+Ce modèle comporte
+$784 \times 64 + 64 + 64 \times 32 + 32 + 32 \times 10 + 10 = \mathbf{52\,650}$ paramètres.
+
+\subsection{Fonction de coût et optimisation}
+
+L'erreur est calculée avec la fonction log-loss (entropie croisée) :
+\[
+\mathcal{L}(y, P) = -\frac{1}{n} \sum_{i=1}^{n} \sum_{k=0}^{9} y_{i,k} \ln P_k(\vec{x}_i).
+\]
+La descente de gradient est appliquée avec des mini-batchs, un taux
+d'apprentissage de $0{,}1$ et $100$ itérations.
+
+% ============================================================
+\section{Résultats et analyse : MNIST}
+% ============================================================
+
+\subsection{Convergence}
+
+La courbe de convergence montre que les trois modèles convergent à des vitesses différentes.
+Le modèle linéaire stagne autour de $0{,}25$ après 100 itérations, tandis que les MLP
+sont capables de descendre beaucoup plus bas grâce à leur capacité à capturer des relations non linéaires.
+Le MLP H=2 converge plus lentement au début, mais il atteint l'erreur la plus faible.
+
+\subsection{Taux d'erreur}
+
+\begin{table}[H]
+\centering
+\caption{Comparaison des trois modèles sur MNIST.}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Modèle} & \textbf{Nb. paramètres} & \textbf{Erreur Train} & \textbf{Erreur Test} \\
+\midrule
+Linéaire        & 7\,850   & 6,94\,\% & 7,53\,\% \\
+MLP H=1         & 50\,890  & 2,79\,\% & 3,48\,\% \\
+MLP H=2         & 52\,650  & 2,31\,\% & 3,15\,\% \\
+\bottomrule
+\end{tabular}
+\label{tab:mnist_resultats}
+\end{table}
+
+Le modèle linéaire atteint une précision de $92{,}47\,\%$ sur le test.
+Le MLP H=1 améliore significativement ce résultat à $96{,}52\,\%, tandis que
+le MLP H=2 obtient $96{,}85\,\%$.
+L'écart train/test reste faible, indiquant une bonne généralisation.
+
+\subsection{Analyse des erreurs}
+
+Sur les $10\,000$ exemples de test, $238$ chiffres sont mal classés par les trois
+modèles simultanément.
+Ces erreurs sont souvent dues à des chiffres ambigus, des écritures atypiques et
+des prédictions erronées fortement confiantes.
+
+\subsection{Visualisation ACP}
+
+L'ACP en deux dimensions révèle que certaines classes sont bien séparées (0 et 1),
+mais que d'autres se chevauchent fortement (3 et 8, 4 et 9, 5 et 6).
+Ce chevauchement explique en partie les confusions observées.
+
+% ============================================================
+\section{Partie 2 : CIFAR-10}
+% ============================================================
+
+\subsection{Présentation du jeu de données CIFAR-10}
+
+CIFAR-10 contient des images couleur $32 \times 32$ pixels avec trois canaux RGB.
+Chaque image est plus complexe que celles de MNIST en raison des objets variés et
+des arrière-plans plus riches.
+Cette base de données constitue un bon passage vers des applications de vision
+plus proches des données réelles.
+
+\subsection{Modèles testés}
+
+Pour la partie CIFAR-10, nous avons évalué :
+\begin{itemize}
+    \item un modèle linéaire sur l'image aplatie couleur ;
+    \item un MLP avec une seule couche cachée sur l'image en niveaux de gris ;
+    \item un MLP avec une seule couche cachée sur l'image couleur ;
+    \item un réseau de neurones convolutif avec deux blocs de convolution et de pooling.
+\end{itemize}
+
+Le modèle linéaire traite chaque pixel indépendamment,
+ce qui limite sa capacité à exploiter la structure spatiale.
+Le MLP introduit des non-linéarités, mais il reste moins adapté aux images que
+le CNN, qui conserve la géométrie locale des objets.
+
+\subsection{Résultats CIFAR-10}
+
+\begin{table}[H]
+\centering
+\caption{Comparaison simplifiée des modèles sur CIFAR-10.}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Modèle} & \textbf{Erreur Test} & \textbf{Remarque} \\
+\midrule
+Linéaire (couleur)   & 23,8\,\% & 30\,730 paramètres \\
+MLP H=1 (gris)        & 22,1\,\% & entrée 1\,024 \\
+MLP H=1 (couleur)     & 29,0\,\% & entrée 3\,072 \\
+CNN                  & 86,2\,\% & architecture convolutive \\
+\bottomrule
+\end{tabular}
+\label{tab:cifar_resultats}
+\end{table}
+
+Le modèle linéaire est nettement moins performant sur CIFAR-10 qu'il ne l'était sur MNIST.
+Le MLP en niveaux de gris surpasse légèrement le modèle linéaire, ce qui montre que
+la non-linéarité aide, mais que l'information spatiale est encore insuffisamment exploitée.
+Le MLP couleur n'améliore pas forcément les résultats : l'augmentation de la dimension
+d'entrée n'est pas équivalente à une meilleure extraction de caractéristiques.
+
+\subsection{Apport du CNN}
+
+Le CNN est le modèle le plus adapté aux images naturelles car il apprend des filtres locaux
+et réduit progressivement la résolution avec le pooling.
+Il est attendu qu'il surpasse les MLP car il capture mieux les structures de textures,
+des contours et des formes présentes dans CIFAR-10.
+
+\subsection{Observations générales}
+
+La transition de MNIST à CIFAR-10 illustre l'importance de choisir une architecture
+adaptée au type de données.
+MNIST est simple, centré et en niveaux de gris, tandis que CIFAR-10 contient des objets
+complexes et des scènes plus variées.
+Le CNN est naturellement plus robuste que les modèles purement denses pour ce type de problème.
+
+\subsection{Limites et perspectives}
+
+La comparaison montre que les modèles linéaires et MLP peuvent suffire pour des tâches
+simples comme MNIST, mais qu'ils atteignent rapidement leurs limites sur CIFAR-10.
+Pour aller plus loin, il conviendrait d'ajouter des couches convolutives supplémentaires,
+des normalisations et des techniques de régularisation.
+
+\clearpage
+% ============================================================
+\section{Annexes}
+% ============================================================
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{mnist_exemples.png}
+    \caption{Exemples d'images MNIST pour chaque classe.}
+    \label{fig:exemples}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.55\textwidth]{convergence.png}
+    \caption{Évolution de la log-loss sur l'ensemble d'entraînement MNIST.}
+    \label{fig:convergence}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{erreurs_communes.png}
+    \caption{Exemples de chiffres ambigus et erreurs communes de classification.}
+    \label{fig:erreurs}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.55\textwidth]{acp.png}
+    \caption{Représentation des données MNIST en 2 dimensions via ACP.}
+    \label{fig:pca}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{cifar_exemples.png}
+    \caption{Exemples d'images CIFAR-10 pour chaque classe.}
+    \label{fig:cifar_exemples}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{cifar_convergence.png}
+    \caption{Évolution de la log-loss au cours de l'entraînement CIFAR-10.}
+    \label{fig:cifar_convergence}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{cifar_erreurs.png}
+    \caption{Exemples d'erreurs de classification par le CNN sur CIFAR-10.}
+    \label{fig:cifar_erreurs}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{cifar_acp.png}
+    \caption{Représentation des données CIFAR-10 en 2 dimensions via ACP.}
+    \label{fig:cifar_acp}
+\end{figure}
+
+\end{document}
