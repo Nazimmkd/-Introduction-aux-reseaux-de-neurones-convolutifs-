@@ -1,152 +1,23 @@
 import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.datasets import fetch_openml
 from sklearn.decomposition import PCA
-import os
-import modeles.modele_lineaire as ml
-import modeles.modele_couches_cachées as mcc
+
+import utils.sorties as sorties
+from utils.donnees import charger_mnist
+from utils.preprocessing import vector_label
+from utils.entrainement import train_model
+from utils.evaluation import evaluer_modele
+from utils.visualisation import (
+    visualiser_exemples,
+    visualiser_erreurs,
+    visualiser_erreurs_communes,
+    tracer_convergence,
+    tracer_acp,
+)
+
+S = lambda nom: sorties.chemin("mnist", nom)
 
 
-def load_mnist_data():
-    data_dir = "data_models"
-    os.makedirs(data_dir, exist_ok=True)
-
-    X_train_path = os.path.join(data_dir, "X_train.npy")
-    X_test_path  = os.path.join(data_dir, "X_test.npy")
-    y_train_path = os.path.join(data_dir, "y_train.npy")
-    y_test_path  = os.path.join(data_dir, "y_test.npy")
-
-    if all(os.path.exists(p) for p in [X_train_path, X_test_path, y_train_path, y_test_path]):
-        print("[LOAD] Chargement des donnees MNIST existantes...")
-        X_train = np.load(X_train_path)
-        X_test  = np.load(X_test_path)
-        y_train = np.load(y_train_path)
-        y_test  = np.load(y_test_path)
-    else:
-        print("[DOWNLOAD] Telechargement des donnees MNIST...")
-        import urllib.request
-        import gzip
-
-        base_url = "https://storage.googleapis.com/cvdf-datasets/mnist/"
-        files = {
-            "train_images": "train-images-idx3-ubyte.gz",
-            "train_labels": "train-labels-idx1-ubyte.gz",
-            "test_images":  "t10k-images-idx3-ubyte.gz",
-            "test_labels":  "t10k-labels-idx1-ubyte.gz",
-        }
-
-        def download_and_parse_images(url):
-            with urllib.request.urlopen(url) as r:
-                with gzip.open(r) as f:
-                    f.read(16)
-                    return np.frombuffer(f.read(), dtype=np.uint8).reshape(-1, 784) / 255.0
-
-        def download_and_parse_labels(url):
-            with urllib.request.urlopen(url) as r:
-                with gzip.open(r) as f:
-                    f.read(8)
-                    return np.frombuffer(f.read(), dtype=np.uint8).astype(int)
-
-        X_train = download_and_parse_images(base_url + files["train_images"])
-        y_train = download_and_parse_labels(base_url + files["train_labels"])
-        X_test  = download_and_parse_images(base_url + files["test_images"])
-        y_test  = download_and_parse_labels(base_url + files["test_labels"])
-
-        np.save(X_train_path, X_train)
-        np.save(X_test_path,  X_test)
-        np.save(y_train_path, y_train)
-        np.save(y_test_path,  y_test)
-
-    return X_train.T, y_train, X_test.T, y_test
-
-
-def vector_label(y, n_classes=10):
-    assert np.all((y >= 0) & (y < n_classes)), f"Label hors bornes : {np.unique(y)}"
-    vectors = np.zeros((n_classes, y.size))
-    vectors[y, np.arange(y.size)] = 1
-    return vectors
-
-
-def train_model(X, Y, model_type="linear", n_h1=64, n_h2=None, lr=0.1, iters=100, batch_size=256):
-    print(f"\nEntrainement : {model_type}...")
-
-    if model_type == "linear":
-        params = list(ml.matrices(784, 10))
-    elif n_h2 is None:
-        params = mcc.initialisation_mlp(784, n_h1, 10)
-    else:
-        params = mcc.initialisation_mlp(784, n_h1, 10, n_h2=n_h2)
-
-    n = X.shape[1]
-    history = []
-
-    for i in range(iters):
-        indices = np.random.permutation(n)
-        X_shuffled = X[:, indices]
-        Y_shuffled = Y[:, indices]
-
-        for start in range(0, n, batch_size):
-            X_batch = X_shuffled[:, start:start + batch_size]
-            Y_batch = Y_shuffled[:, start:start + batch_size]
-
-            if model_type == "linear":
-                Z = ml.fonction_score(X_batch, params[0], params[1])
-                A_out = ml.softmax(Z)
-                grads = ml.gradient(X_batch, Y_batch, A_out)
-                params[0] -= lr * grads[0]
-                params[1] -= lr * grads[1]
-            else:
-                outputs = mcc.forward_pass(X_batch, params)
-                A_out = outputs["A3"] if n_h2 is not None else outputs["A2"]
-                grads = mcc.backpropagation(X_batch, Y_batch, outputs, params)
-                for key in params:
-                    params[key] -= lr * grads["d" + key]
-
-        if model_type == "linear":
-            Z = ml.fonction_score(X, params[0], params[1])
-            A_full = ml.softmax(Z)
-        else:
-            outputs = mcc.forward_pass(X, params)
-            A_full = outputs["A3"] if n_h2 is not None else outputs["A2"]
-
-        loss = ml.log_loss(Y, A_full)
-        history.append(loss)
-
-        if (i + 1) % 10 == 0:
-            print(f"[{model_type.upper()}] itération {i + 1}/{iters}, Erreur: {loss:.4f}")
-
-    return params, history
-
-
-def analyze_errors(X, y, params, model_type="linear", n_h2=False, ensemble="TEST"):
-    if model_type == "linear":
-        Z = ml.fonction_score(X, params[0], params[1])
-        scores = ml.softmax(Z)
-    else:
-        out = mcc.forward_pass(X, params)
-        scores = out["A3"] if n_h2 else out["A2"]
-
-    predictions = np.argmax(scores, axis=0)
-    probs = np.max(scores, axis=0)
-    errors = predictions != y
-    error_indices = np.where(errors)[0]
-    accuracy = np.mean(predictions == y)
-
-    label = f"[MODELE {model_type.upper()} {('H=2' if n_h2 else 'H=1') if model_type == 'mlp' else ''}]"
-    print(f"\n{label} (Ensemble {ensemble})")
-    print(f"Precision: {accuracy * 100:.2f}%")
-    print(f"Nombre d'erreurs: {len(error_indices)} ({len(error_indices) / len(y) * 100:.2f}%)")
-    print(f"Predictions correctes: {len(y) - len(error_indices)} ({(1 - len(error_indices) / len(y)) * 100:.2f}%)")
-
-    if len(error_indices) > 0 and ensemble == "TEST":
-        print("\nExemples d'erreurs:")
-        for i in error_indices[:5]:
-            print(f"  Indice {i}: Vraie classe={y[i]}, Prediction={predictions[i]}, Confiance={probs[i] * 100:.2f}%")
-
-    return predictions, accuracy
-
-
-def nb_parametres(model_type, n_h1=64, n_h2=None):
+def nb_params(model_type, n_h1=64, n_h2=None):
     if model_type == "linear":
         return 784 * 10 + 10
     elif n_h2 is None:
@@ -155,117 +26,73 @@ def nb_parametres(model_type, n_h1=64, n_h2=None):
         return 784 * n_h1 + n_h1 + n_h1 * n_h2 + n_h2 + n_h2 * 10 + 10
 
 
-def visualiser_exemples(X_train, y_train):
-    fig, axes = plt.subplots(2, 5, figsize=(12, 5))
-    fig.suptitle('Exemples MNIST', fontsize=16)
-    for i in range(10):
-        idx = np.where(y_train == i)[0][0]
-        ax = axes[i // 5, i % 5]
-        ax.imshow(X_train[:, idx].reshape(28, 28), cmap='gray')
-        ax.set_title(f"Label: {i}")
-        ax.axis('off')
-    plt.tight_layout()
-    plt.show()
+log = sorties.demarrer_log("mnist")
+try:
+    # ── Données ───────────────────────────────────────────────────
+    X_train, y_train, X_test, y_test = charger_mnist()
+    visualiser_exemples(X_train, y_train, titre='Exemples MNIST', image_shape=(28, 28))
 
+    Y_train = vector_label(y_train)
 
-def visualiser_erreurs(X_test, y_test, predictions, model_name="MLP"):
-    error_indices = np.where(predictions != y_test)[0]
-    fig, axes = plt.subplots(2, 5, figsize=(12, 5))
-    fig.suptitle(f"Exemples mal classes par {model_name}", fontsize=13)
-    for i, idx in enumerate(error_indices[:10]):
-        ax = axes[i // 5][i % 5]
-        ax.imshow(X_test[:, idx].reshape(28, 28), cmap='gray')
-        ax.set_title(f"Vrai:{y_test[idx]} Predit:{predictions[idx]}")
-        ax.axis('off')
-    plt.tight_layout()
-    plt.show()
+    # ── Entraînement ──────────────────────────────────────────────
+    params_lin, hist_lin = train_model(X_train, Y_train, "linear", lr=0.1, iters=100, batch_size=256)
+    params_h1,  hist_h1  = train_model(X_train, Y_train, "mlp", n_h1=64, lr=0.1, iters=100, batch_size=256)
+    params_h2,  hist_h2  = train_model(X_train, Y_train, "mlp", n_h1=64, n_h2=32, lr=0.1, iters=100, batch_size=256)
 
+    # ── Évaluation TRAIN ──────────────────────────────────────────
+    print("\n" + "=" * 60)
+    print("EVALUATION SUR LE TRAIN")
+    print("=" * 60)
+    _, acc_lin_train = evaluer_modele(X_train, y_train, params_lin, "linear", ensemble="TRAIN")
+    _, acc_h1_train  = evaluer_modele(X_train, y_train, params_h1,  "mlp",    ensemble="TRAIN")
+    _, acc_h2_train  = evaluer_modele(X_train, y_train, params_h2,  "mlp", n_h2=True, ensemble="TRAIN")
 
-# chiffres ambigus mal classes par les 3 modeles
-def visualiser_erreurs_communes(X_test, y_test, pred_lin, pred_h1, pred_h2):
-    communes = np.where((pred_lin != y_test) & (pred_h1 != y_test) & (pred_h2 != y_test))[0]
-    print(f"\nChiffres mal classes par les 3 modeles : {len(communes)}")
-    fig, axes = plt.subplots(2, 5, figsize=(12, 5))
-    fig.suptitle("Chiffres ambigus (mal classes par les 3 modeles)", fontsize=13)
-    for i, idx in enumerate(communes[:10]):
-        ax = axes[i // 5][i % 5]
-        ax.imshow(X_test[:, idx].reshape(28, 28), cmap='gray')
-        ax.set_title(f"Vrai:{y_test[idx]}\nL:{pred_lin[idx]} H1:{pred_h1[idx]} H2:{pred_h2[idx]}", fontsize=7)
-        ax.axis('off')
-    plt.tight_layout()
-    plt.show()
+    # ── Évaluation TEST ───────────────────────────────────────────
+    print("\n" + "=" * 60)
+    print("EVALUATION ET ANALYSE DES ERREURS DE CLASSIFICATION")
+    print("=" * 60)
+    pred_lin, acc_lin = evaluer_modele(X_test, y_test, params_lin, "linear", afficher_exemples=True)
+    pred_h1,  acc_h1  = evaluer_modele(X_test, y_test, params_h1,  "mlp",   afficher_exemples=True)
+    pred_h2,  acc_h2  = evaluer_modele(X_test, y_test, params_h2,  "mlp", n_h2=True, afficher_exemples=True)
 
+    # ── Tableau récapitulatif ─────────────────────────────────────
+    print("\n" + "=" * 70)
+    print(f"{'Modèle':<20} {'Nb params':>10} {'Err. Train':>12} {'Err. Test':>12}")
+    print("-" * 70)
+    print(f"{'Linéaire':<20} {nb_params('linear'):>10} {(1-acc_lin_train)*100:>11.2f}% {(1-acc_lin)*100:>11.2f}%")
+    print(f"{'MLP H=1':<20} {nb_params('mlp',64):>10} {(1-acc_h1_train)*100:>11.2f}% {(1-acc_h1)*100:>11.2f}%")
+    print(f"{'MLP H=2':<20} {nb_params('mlp',64,32):>10} {(1-acc_h2_train)*100:>11.2f}% {(1-acc_h2)*100:>11.2f}%")
+    print("=" * 70)
 
-X_train, y_train, X_test, y_test = load_mnist_data()
+    # ── Visualisations ────────────────────────────────────────────
+    visualiser_erreurs(X_test, y_test, pred_lin,
+                       titre="Modèle Linéaire", save_path=S("erreurs_lineaire.png"))
+    visualiser_erreurs(X_test, y_test, pred_h1,
+                       titre="MLP H=1", save_path=S("erreurs_mlp_h1.png"))
+    visualiser_erreurs(X_test, y_test, pred_h2,
+                       titre="MLP H=2", save_path=S("erreurs_mlp_h2.png"))
 
-visualiser_exemples(X_train, y_train)
+    visualiser_erreurs_communes(X_test, y_test, {
+        "Linéaire": pred_lin,
+        "MLP H=1":  pred_h1,
+        "MLP H=2":  pred_h2,
+    }, save_path=S("erreurs_communes.png"))
 
-Y_train = vector_label(y_train)
-Y_test  = vector_label(y_test)
+    acp = PCA(n_components=2)
+    acp.fit(X_train.T)
+    X_test_2d = acp.transform(X_test.T)
 
-params_lin, hist_lin = train_model(X_train, Y_train, "linear", lr=0.1, iters=100, batch_size=256)
-params_h1,  hist_h1  = train_model(X_train, Y_train, "mlp", n_h1=64, lr=0.1, iters=100, batch_size=256)
-params_h2,  hist_h2  = train_model(X_train, Y_train, "mlp", n_h1=64, n_h2=32, lr=0.1, iters=100, batch_size=256)
+    tracer_convergence(
+        [hist_lin, hist_h1, hist_h2],
+        ["Linéaire", "MLP H=1", "MLP H=2"],
+        titre="Convergence MNIST (Log Loss)",
+        save_path=S("convergence.png"),
+    )
+    tracer_acp(
+        X_test_2d, y_test,
+        titre="Visualisation ACP des chiffres MNIST",
+        save_path=S("acp.png"),
+    )
 
-# évaluation sur le TRAIN
-print("\n" + "=" * 60)
-print("EVALUATION SUR LE TRAIN")
-print("=" * 60)
-pred_lin_train, acc_lin_train = analyze_errors(X_train, y_train, params_lin, "linear", ensemble="TRAIN")
-pred_h1_train,  acc_h1_train  = analyze_errors(X_train, y_train, params_h1,  "mlp",    ensemble="TRAIN")
-pred_h2_train,  acc_h2_train  = analyze_errors(X_train, y_train, params_h2,  "mlp", n_h2=True, ensemble="TRAIN")
-
-print("\n" + "=" * 60)
-print("EVALUATION ET ANALYSE DES ERREURS DE CLASSIFICATION")
-print("=" * 60)
-
-pred_lin, acc_lin = analyze_errors(X_test, y_test, params_lin, "linear")
-pred_h1,  acc_h1  = analyze_errors(X_test, y_test, params_h1,  "mlp")
-pred_h2,  acc_h2  = analyze_errors(X_test, y_test, params_h2,  "mlp", n_h2=True)
-
-#  tableau complet avec nb params + train + test
-print("\n" + "=" * 70)
-print(f"{'Modele':<20} {'Nb params':>10} {'Err. Train':>12} {'Err. Test':>12}")
-print("-" * 70)
-print(f"{'Lineaire':<20} {nb_parametres('linear'):>10} {(1-acc_lin_train)*100:>11.2f}% {(1-acc_lin)*100:>11.2f}%")
-print(f"{'MLP H=1':<20} {nb_parametres('mlp',64):>10} {(1-acc_h1_train)*100:>11.2f}% {(1-acc_h1)*100:>11.2f}%")
-print(f"{'MLP H=2':<20} {nb_parametres('mlp',64,32):>10} {(1-acc_h2_train)*100:>11.2f}% {(1-acc_h2)*100:>11.2f}%")
-print("=" * 70)
-
-visualiser_erreurs(X_test, y_test, pred_lin, "Modele Lineaire")
-visualiser_erreurs(X_test, y_test, pred_h1, "MLP H=1")
-visualiser_erreurs(X_test, y_test, pred_h2, "MLP H=2")
-
-
-visualiser_erreurs_communes(X_test, y_test, pred_lin, pred_h1, pred_h2)
-
-
-acp = PCA(n_components=2)
-acp.fit(X_train.T)
-X_test_2d = acp.transform(X_test.T)
-
-#  Convergence
-plt.figure(figsize=(10, 6))
-plt.plot(hist_lin, label="Lineaire")
-plt.plot(hist_h1,  label="MLP H=1")
-plt.plot(hist_h2,  label="MLP H=2")
-plt.title("Convergence (Log Loss)")
-plt.xlabel("Epoques")
-plt.ylabel("Erreur (Log Loss)")
-plt.legend()
-plt.grid(True)
-plt.tight_layout()
-plt.savefig("mnist_convergence.png", dpi=300, bbox_inches='tight')
-plt.show()
-
-# ACP
-plt.figure(figsize=(10, 8))
-scatter = plt.scatter(X_test_2d[:, 0], X_test_2d[:, 1], c=y_test, cmap='tab10', s=5, alpha=0.5)
-plt.title("Visualisation ACP des chiffres")
-plt.xlabel("Composante 1")
-plt.ylabel("Composante 2")
-plt.colorbar(scatter, label="Classes (0-9)")
-plt.grid(True)
-plt.tight_layout()
-plt.savefig("mnist_acp.png", dpi=300, bbox_inches='tight')
-plt.show()
+finally:
+    log.close()

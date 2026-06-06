@@ -1,0 +1,775 @@
+\documentclass[a4paper,11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{titlesec}
+
+\geometry{margin=2.2cm}
+\hypersetup{colorlinks=true, linkcolor=black, urlcolor=blue}
+
+% ── Mise en forme des titres ──────────────────────────────────
+\titleformat{\section}{\large\bfseries}{}{0em}{}[\titlerule]
+\titleformat{\subsection}{\normalsize\bfseries}{}{0em}{}
+
+\title{
+  \vspace{-1cm}
+  {\small Université — Mathématiques pour le Machine Learning}\\[0.4cm]
+  \rule{\linewidth}{0.5pt}\\[0.4cm]
+  {\LARGE\bfseries Classification d'images par réseaux de neurones}\\[0.2cm]
+  {\large De la reconnaissance de chiffres manuscrits\\
+          à la détection de cancers du sein}\\[0.3cm]
+  \rule{\linewidth}{0.5pt}
+}
+\author{
+  Nazim Mekideche \quad Armand Lauener \\
+  Mohamed Ouadihi \quad Macéo Pierson
+}
+\date{Juin 2026}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+% ============================================================
+\section{Introduction}
+% ============================================================
+
+Ce rapport présente l'implémentation et l'analyse mathématique de modèles
+de classification d'images progressivement plus complexes, dans le cadre du cours
+\textit{Mathématiques pour le Machine Learning}.
+
+Trois jeux de données sont étudiés dans l'ordre croissant de difficulté :
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{MNIST} — chiffres manuscrits $28\times28$ pixels, 10 classes, 60\,000 images.
+  \item \textbf{CIFAR-10} — objets naturels $32\times32$ pixels RGB, 10 classes, 50\,000 images.
+  \item \textbf{CBIS-DDSM} — mammographies médicales $224\times224$ pixels, classification
+        binaire bénin/malin, 1\,318 images d'entraînement.
+\end{enumerate}
+
+Chaque partie introduit de nouvelles contraintes mathématiques :
+MNIST illustre les fondements de la classification supervisée ;
+CIFAR-10 motive les réseaux convolutifs ;
+CBIS-DDSM impose des métriques médicales asymétriques et une gestion du déséquilibre de classes.
+
+% ============================================================
+\section{Fondements mathématiques}
+% ============================================================
+
+\subsection{Représentation des données et notations}
+
+Une image est représentée par un vecteur $\vec{x} \in \mathbb{R}^d$
+(après aplatissement si nécessaire) ou par un tenseur $\mathbf{X} \in \mathbb{R}^{C \times H \times W}$.
+Le label associé est encodé en vecteur one-hot $\vec{y} \in \{0,1\}^K$ avec $K$ classes.
+
+\subsection{Fonction softmax et prédiction}
+
+Le vecteur de scores bruts $\vec{z} = A\vec{x} + \vec{b}$ est transformé en distribution
+de probabilités par la softmax :
+\[
+  P_k(\vec{x}) = \frac{e^{z_k}}{\displaystyle\sum_{j=1}^{K} e^{z_j}}, \qquad k \in \{1,\ldots,K\}
+\]
+La prédiction est $\hat{y} = \arg\max_k P_k(\vec{x})$.
+
+\subsection{Fonction de coût — entropie croisée}
+
+La perte log-loss (entropie croisée catégorielle) pénalise l'écart entre
+la distribution prédite et le label réel :
+\[
+  \mathcal{L}(\vec{y}, P) = -\frac{1}{n}\sum_{i=1}^{n}\sum_{k=1}^{K}
+  y_{ik}\ln P_k(\vec{x}_i)
+\]
+Pour une classification binaire, la BCE (\textit{Binary Cross-Entropy}) utilise
+une seule sortie $z$ et la sigmoïde $\sigma(z) = 1/(1+e^{-z})$ :
+\[
+  \mathcal{L}_{BCE} = -\frac{1}{n}\sum_{i=1}^{n}
+  \Bigl[w^+\,y_i\ln\sigma(z_i) + (1-y_i)\ln(1-\sigma(z_i))\Bigr]
+\]
+où $w^+$ est le poids de la classe positive (maligne en médecine).
+
+\subsection{Rétropropagation et descente de gradient}
+
+Les paramètres $\theta$ sont mis à jour par descente de gradient stochastique (SGD)
+avec mini-batches de taille $B$ :
+\[
+  \theta \leftarrow \theta - \eta\,\nabla_\theta \mathcal{L}(\mathcal{B})
+\]
+La rétropropagation calcule $\nabla_\theta \mathcal{L}$ par la règle de dérivation composée.
+Pour un réseau à $L$ couches, les gradients de la couche $l$ sont :
+\[
+  \delta^{(l)} = \left(W^{(l+1)}\right)^\top \delta^{(l+1)} \odot \sigma'\!\left(z^{(l)}\right)
+\]
+
+\subsection{Fonctions d'activation}
+
+\begin{table}[H]
+\centering
+\caption{Fonctions d'activation testées dans ce projet.}
+\begin{tabular}{lllll}
+\toprule
+\textbf{Nom} & \textbf{Formule} & \textbf{Dérivée} & \textbf{Image} & \textbf{Remarque} \\
+\midrule
+Sigmoïde   & $\sigma(z)=\frac{1}{1+e^{-z}}$ & $\sigma(1-\sigma)$ & $(0,1)$ & Gradient qui disparaît en profondeur \\
+Tanh       & $\tanh(z)$      & $1-\tanh^2(z)$  & $(-1,1)$ & Centré, mieux que sigmoïde \\
+ReLU       & $\max(0,z)$     & $\mathbf{1}_{z>0}$ & $[0,+\infty)$ & Gradient constant, efficace en profondeur \\
+Heaviside  & $\mathbf{1}_{z\geq0}$ & $0$ p.p. & $\{0,1\}$ & Non différentiable, gradient nul \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Problème du gradient qui disparaît :} avec sigmoid/tanh, le gradient
+$|\sigma'(z)| \leq 0{,}25$ — après $L$ couches, le gradient est multiplié par
+$0{,}25^L \to 0$. ReLU évite ce problème car $\sigma'(z) = 1$ pour $z > 0$.
+
+% ============================================================
+\section{Partie 1 — MNIST : classification de chiffres manuscrits}
+% ============================================================
+
+\subsection{Description du jeu de données}
+
+MNIST contient $60\,000$ images d'entraînement et $10\,000$ de test,
+réparties équitablement sur 10 classes (chiffres 0--9).
+Chaque image est un vecteur $\vec{x} \in \mathbb{R}^{784}$ de niveaux de gris normalisés dans $[0,1]$.
+
+\subsection{Modèle linéaire}
+
+Le modèle le plus simple calcule des scores linéaires :
+\[
+  \vec{z} = A\vec{x} + \vec{b}, \qquad A \in \mathbb{R}^{10 \times 784},\; \vec{b} \in \mathbb{R}^{10}
+\]
+\textbf{Nombre de paramètres :} $784 \times 10 + 10 = \mathbf{7\,850}$
+
+Ce modèle apprend un ``gabarit'' par classe. Il n'exploite aucune interaction entre pixels,
+ce qui limite ses performances sur des formes spatiales complexes.
+
+\subsection{MLP à une couche cachée (H=1)}
+
+On ajoute une couche cachée de $p_1 = 64$ neurones avec activation sigmoid :
+\[
+  \vec{z}^{(1)} = \sigma\!\left(A^{(1)}\vec{x} + \vec{b}^{(1)}\right) \in \mathbb{R}^{64}, \qquad
+  \vec{z}^{(2)} = A^{(2)}\vec{z}^{(1)} + \vec{b}^{(2)} \in \mathbb{R}^{10}
+\]
+\textbf{Nombre de paramètres :}
+$784\times64 + 64 + 64\times10 + 10 = \mathbf{50\,890}$
+
+\textbf{Choix de 64 neurones :} compromis entre capacité (trop peu → sous-apprentissage)
+et temps de calcul. La couche cachée permet au réseau de construire des représentations
+intermédiaires non linéaires : combinaisons de pixels évoquant des parties de chiffres.
+
+\subsection{MLP à deux couches cachées (H=2)}
+
+On ajoute une seconde couche de $p_2 = 32$ neurones :
+\[
+  \vec{z}^{(2)} = \sigma\!\left(A^{(2)}\vec{z}^{(1)} + \vec{b}^{(2)}\right) \in \mathbb{R}^{32}
+\]
+\textbf{Nombre de paramètres :}
+$784\times64+64 + 64\times32+32 + 32\times10+10 = \mathbf{52\,650}$
+
+L'architecture en entonnoir $784 \to 64 \to 32 \to 10$ force une compression progressive :
+H=1 détecte des caractéristiques simples (bords, courbes), H=2 les combine en motifs complexes.
+
+\subsection{Comparaison des activations × architectures}
+
+Au-delà du minimum requis, nous avons conduit une grille d'expériences
+croisant 4 activations (sigmoid, tanh, relu, heaviside) et 5 architectures MLP.
+Les principaux enseignements :
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Heaviside} : gradient nul presque partout — le réseau n'apprend pas
+        au-delà de H=1 (gradient bloqué dès la deuxième couche cachée).
+  \item \textbf{Sigmoid vs ReLU} : sur MNIST peu profond, les deux convergent ;
+        ReLU est légèrement plus rapide sur les architectures $\geq 3$ couches.
+  \item \textbf{Tanh} : meilleur que sigmoid grâce à sa symétrie centrée en 0,
+        ce qui améliore le conditionnement du gradient.
+\end{itemize}
+
+\subsection{Résultats}
+
+\begin{table}[H]
+\centering
+\caption{Performances sur MNIST (100 itérations, lr=0{,}1, batch=256).}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Modèle} & \textbf{Params} & \textbf{Acc. Train} & \textbf{Acc. Test} & \textbf{Erreur Test} \\
+\midrule
+Linéaire               & 7\,850   & 93{,}06\,\% & 92{,}47\,\% & 7{,}53\,\% \\
+MLP H=1 [64] sigmoid   & 50\,890  & 97{,}21\,\% & 96{,}52\,\% & 3{,}48\,\% \\
+MLP H=2 [64,32] sigmoid & 52\,650 & 97{,}69\,\% & 96{,}85\,\% & 3{,}15\,\% \\
+\bottomrule
+\end{tabular}
+\label{tab:mnist}
+\end{table}
+
+Le modèle linéaire atteint déjà $92{,}47\,\%$ — MNIST est un problème relativement simple
+grâce au fond blanc uniforme et aux chiffres centrés. Le MLP H=2 gagne $+4{,}4$ points
+en introduisant deux niveaux de représentation non linéaire.
+
+\subsection{Analyse des erreurs et visualisation ACP}
+
+Sur les $10\,000$ images de test, 238 sont mal classées simultanément par les trois modèles.
+Ces erreurs se concentrent sur des paires ambiguës : $(3,8)$, $(4,9)$, $(5,6)$.
+
+La projection ACP en 2 dimensions (figure~\ref{fig:mnist_acp}) confirme cette observation :
+les classes 0 et 1 sont très bien séparées (formes distinctives),
+tandis que 3/8 et 4/9 se chevauchent significativement.
+Ce chevauchement est intrinsèque aux données et ne peut être réduit
+qu'en exploitant la structure spatiale (ce que le MLP ne fait pas).
+
+% ============================================================
+\section{Partie 2 — CIFAR-10 : objets naturels en couleur}
+% ============================================================
+
+\subsection{Description du jeu de données}
+
+CIFAR-10 contient $50\,000$ images $32\times32$ pixels RGB, réparties sur 10 classes
+d'objets naturels (avion, cheval, chien, etc.).
+L'espace de représentation est $\mathbb{R}^{3\,072}$ (couleur) ou $\mathbb{R}^{1\,024}$ (gris).
+
+\textbf{Pourquoi CIFAR-10 est plus difficile que MNIST :}
+\begin{itemize}[leftmargin=*]
+  \item Fonds complexes et variés (vs fond blanc uniforme MNIST)
+  \item Translations, rotations, occlusions fréquentes
+  \item Couleur ajoute de la dimensionnalité sans garantir d'aide discriminante
+  \item Pas d'invariance de translation dans un MLP : un avion en haut à gauche
+        et un avion en bas à droite activent des poids totalement différents
+\end{itemize}
+
+\subsection{Modèles linéaires et MLP — limitations}
+
+\begin{table}[H]
+\centering
+\caption{Performances des modèles denses sur CIFAR-10 (50 itérations, lr=0{,}1).}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Modèle} & \textbf{Entrée} & \textbf{Acc. Test} & \textbf{Remarque} \\
+\midrule
+Linéaire (gris)    & $1\,024$ & 28{,}2\,\% & Gabarit moyen par classe \\
+MLP [128] (gris)   & $1\,024$ & 34{,}2\,\% & Non-linéarité insuffisante \\
+Linéaire (couleur) & $3\,072$ & 40{,}0\,\% & Couleur légèrement aidante \\
+MLP [128] (couleur)& $3\,072$ & 43{,}3\,\% & Plus de features, mais pas de structure \\
+\bottomrule
+\end{tabular}
+\label{tab:cifar_dense}
+\end{table}
+
+\noindent Le MLP couleur ($43{,}3\,\%$) surpasse à peine le MLP gris ($34{,}2\,\%$) malgré
+$3\times$ plus d'entrées : la couleur brute non structurée n'aide pas le MLP autant qu'on
+pourrait l'espérer.
+
+\subsection{Opération de convolution 2D}
+
+La convolution répond au problème d'invariance spatiale en appliquant le même filtre
+$K \in \mathbb{R}^{k \times k}$ en toute position de l'image :
+\[
+  (X * K)[i,j] = \sum_{u=0}^{k-1}\sum_{v=0}^{k-1} X[i+u,\, j+v]\cdot K[u,v]
+\]
+\textbf{Partage de poids :} un seul filtre $K$ (par exemple $3\times3 = 9$ paramètres)
+détecte la même structure locale partout dans l'image — vs le MLP qui alloue un poids
+distinct à chaque position. Cela réduit drastiquement le nombre de paramètres et confère
+l'invariance de translation.
+
+\subsection{Filtres K1–K6 du cours}
+
+Six filtres canoniques illustrent ce que les premières couches apprennent :
+
+\begin{table}[H]
+\centering
+\caption{Filtres $3\times3$ du cours et leur effet (figure~\ref{fig:filtres}).}
+\begin{tabular}{llp{7cm}}
+\toprule
+\textbf{Filtre} & \textbf{Type} & \textbf{Effet mathématique} \\
+\midrule
+K1 & Flou (moyenneur)       & $K_1 = \frac{1}{9}\mathbf{1}_{3\times3}$ — supprime le bruit haute fréquence \\
+K2 & Netteté (laplacien)    & $K_2[1,1]=5$, voisins $=-1$ — amplification des gradients locaux \\
+K3 & Bords horizontaux      & Détecte $\partial I / \partial y$ (transitions verticales) \\
+K4 & Bords verticaux        & Détecte $\partial I / \partial x$ (transitions horizontales) \\
+K5 & Sobel horizontal       & Approximation robuste de $\partial I / \partial x$ \\
+K6 & Diagonal               & Détecte les transitions en diagonale \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Les premières couches d'un CNN entraîné apprennent automatiquement des variantes
+de ces filtres — c'est ce que les visualisations de Zeiler \& Fergus (2014) ont démontré.
+
+\subsection{Architecture CNN PyTorch}
+
+L'architecture convolutive implémentée suit le schéma du cours :
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+\textbf{Couche} & \textbf{Dimensions sortie} & \textbf{Paramètres} \\
+\midrule
+Conv1($3\to64$, $3\times3$) + ReLU         & $(64, 32, 32)$ & $3\times3\times3\times64 = 1\,728$ \\
+Conv2($64\to64$, $3\times3$) + ReLU + Pool & $(64, 16, 16)$ & $3\times3\times64\times64 = 36\,864$ \\
+Conv3($64\to64$, $3\times3$) + ReLU + Pool & $(64, 8, 8)$   & $36\,864$ \\
+Conv4($64\to64$, $3\times3$) + ReLU        & $(64, 8, 8)$   & $36\,864$ \\
+Dropout($p=0{,}3$) + FC($4096\to10$)       & $10$           & $40\,970$ \\
+\midrule
+\textbf{Total}                              &               & $\mathbf{\approx 152\,778}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Max Pooling :} réduit la résolution par $2\times2$ en prenant le maximum local.
+Effet dual : réduction de la dimension computationnelle + légère invariance de translation.
+
+\textbf{Dropout($p=0{,}3$) :} désactive chaque neurone avec probabilité $p$ durant
+l'entraînement (avec mise à l'échelle inverted dropout $1/(1-p)$).
+Force des représentations redondantes, réduit l'overfitting.
+
+\subsection{Résultats CNN et analyse de l'overfitting}
+
+\begin{table}[H]
+\centering
+\caption{CNN PyTorch sur CIFAR-10 (Adam lr=0{,}001, augmentation, early stopping patience=6).}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Modèle} & \textbf{Acc. Train} & \textbf{Acc. Test} & \textbf{Gain vs MLP} \\
+\midrule
+MLP [128] couleur & — & 43{,}3\,\% & — \\
+CNN 4 conv.       & 83{,}4\,\% & \textbf{80{,}8\,\%} & +37{,}5 pts \\
+\bottomrule
+\end{tabular}
+\label{tab:cifar_cnn}
+\end{table}
+
+L'écart train/test de $2{,}6$ points traduit un \textbf{faible overfitting},
+signe positif de l'efficacité du Dropout et de l'augmentation de données.
+
+\textbf{Augmentation de données :} flip horizontal, crop aléatoire ($\pm4$ px), variation
+de luminosité et de contraste. Ces transformations augmentent artificiellement la diversité
+du dataset sans modifier les étiquettes, régularisant implicitement le modèle.
+
+Tableau de référence scientifique pour CIFAR-10 :
+\textit{Conv. Deep Belief Network} 78{,}9\,\%,
+\textit{Maxout Networks} 90{,}6\,\%,
+\textit{Vision Transformer (ViT)} 99{,}5\,\%.
+
+% ============================================================
+\section{Partie 3 — CBIS-DDSM : détection de cancers du sein}
+% ============================================================
+
+\subsection{Contexte médical et description du dataset}
+
+Le dataset CBIS-DDSM (\textit{Curated Breast Imaging Subset of DDSM}) contient des
+mammographies numériques annotées pour la classification bénin/malin de masses mammaires.
+
+\textbf{Caractéristiques clés :}
+\begin{itemize}[leftmargin=*]
+  \item Distribution quasi-équilibrée : $48{,}3\,\%$ malins — déséquilibre faible mais traité
+  \item Taille limitée : $1\,318$ images d'entraînement, $378$ de test
+  \item Format : crops $224\times224$ px centrés sur la masse, niveaux de gris
+  \item Enjeu clinique : un faux négatif (cancer manqué) peut être fatal
+\end{itemize}
+
+\textbf{Métriques médicales :} l'accuracy globale est insuffisante. Les métriques pertinentes sont :
+\begin{align*}
+  \text{Sensibilité} &= \frac{TP}{TP+FN} & \text{(cancers détectés)} \\
+  \text{Spécificité} &= \frac{TN}{TN+FP} & \text{(bénins correctement classés)}
+\end{align*}
+
+\subsection{Gestion du déséquilibre de classes}
+
+Même quasi-équilibré, nous appliquons des poids inversement proportionnels à la fréquence :
+\[
+  w_c = \frac{N}{2\,n_c}, \quad c \in \{0,1\}
+\]
+Ces poids sont intégrés dans la \texttt{CrossEntropyLoss} via
+$\mathcal{L}_{CE}^w = -\sum_k w_k\,y_k\ln P_k$.
+Cela pénalise plus fortement les erreurs sur la classe sous-représentée.
+
+\subsection{Prétraitement et augmentation médicale}
+
+Les mammographies originales ($\sim 4\,000$ px) sont réduites à $224\times224$ via
+des crops centrés sur la masse annotée.
+L'augmentation médicale est strictement contrôlée :
+
+\begin{table}[H]
+\centering
+\caption{Augmentation médicale : transformations appliquées et justification.}
+\begin{tabular}{lll}
+\toprule
+\textbf{Transformation} & \textbf{Paramètres} & \textbf{Justification} \\
+\midrule
+Flip horizontal       & $p=0{,}5$          & Masse peut apparaître des deux côtés \\
+Rotation              & $\pm 15^\circ$      & Masses sans orientation fixe \\
+Zoom                  & $\pm12\,\%$         & Variabilité de numérisation \\
+Luminosité            & $\pm25\,\%$         & Calibrations scanner différentes \\
+Contraste             & $\pm25\,\%$         & Idem \\
+\textbf{Flip vertical} & \textbf{Non appliqué} & Orientation anatomique haut/bas significative \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Rotation et zoom sont combinés en une seule transformation affine vectorisée
+(\texttt{F.affine\_grid} / \texttt{F.grid\_sample}) pour éviter deux interpolations
+successives qui dégraderaient les micro-textures diagnostiques.
+
+\subsection{Gestion mémoire GPU — accumulation de gradients}
+
+L'entraînement sur des images $224\times224$ avec un batch de 32 nécessite
+$\sim$600 MB de VRAM, dépassant la capacité disponible. La solution est l'accumulation
+de gradients : on accumule les gradients sur $K$ micro-batches avant la mise à jour :
+\[
+  \nabla_{\text{accumulé}} = \frac{1}{K}\sum_{k=1}^{K} \nabla_{\mathcal{L}(\mathcal{B}_k)}
+  \approx \nabla_{\mathcal{L}(\mathcal{B}_{\text{eff}})}, \quad
+  \mathcal{B}_{\text{eff}} = K \cdot \mathcal{B}_k
+\]
+On utilise batch physique $= 8$ et $K = 4$, soit un batch effectif de $32$.
+
+\textbf{Important :} BatchNorm calcule ses statistiques sur le batch \emph{physique} de 8,
+pas sur le batch effectif. Ce point est discuté en détail en section~\ref{sec:ablation}.
+
+\subsection{Modèles implémentés}
+
+\subsubsection*{MLP profond ReLU [2048, 1024, 512, 256]}
+
+Les images sont aplaties en vecteurs de $224\times224 = 50\,176$ valeurs.
+L'architecture en entonnoir progressif vise à capturer des interactions complexes :
+\[
+  50\,176 \xrightarrow{ReLU} 2048 \xrightarrow{ReLU} 1024
+  \xrightarrow{ReLU} 512 \xrightarrow{ReLU} 256 \xrightarrow{softmax} 2
+\]
+ReLU est choisi pour ses propriétés de gradient constant sur les activations positives —
+indispensable sur 4 couches cachées pour éviter la disparition du gradient.
+
+\subsubsection*{CNN from scratch (CNNBinaire)}
+
+4 blocs Conv+BatchNorm+ReLU+MaxPool réduisent progressivement la résolution :
+\[
+  (1,224,224) \to (32,112,112) \to (64,56,56) \to (128,28,28) \to (128,14,14)
+\]
+suivis d'un classificateur dense avec Dropout(0.5 / 0.3).
+
+L'initialisation de He (Kaiming, 2015) est appliquée explicitement à toutes les couches :
+\[
+  \sigma_W = \sqrt{\frac{2}{\text{fan\_out}}}
+\]
+Cette formule compense la réduction de variance de ReLU ($\mathbf{E}[\max(0,z)^2] = \frac{1}{2}\mathbf{E}[z^2]$
+pour $z$ symétrique), garantissant une propagation stable du signal.
+
+\subsubsection*{ResNet18 transfer learning}
+
+ResNet18 pré-entraîné sur ImageNet ($1{,}2$M images) est adapté :
+\begin{enumerate}[leftmargin=*]
+  \item \texttt{conv1} recréé pour 1 canal gris (réinitialisé, ré-appris)
+  \item \texttt{layer1}, \texttt{layer2} gelés — préservent les features universelles
+        (bords, textures) apprises sur ImageNet, démontrées universelles par Zeiler \& Fergus (2014)
+  \item \texttt{layer3}, \texttt{layer4}, \texttt{fc} fine-tunés avec lr=$5\times10^{-5}$
+        pour spécialiser aux textures des masses mammaires
+\end{enumerate}
+Paramètres entraînables : $10\,793\,410$.
+
+\subsection{Calibration du seuil de décision}
+
+Le seuil $0{,}5$ par défaut n'est pas optimal en médecine.
+On cherche le seuil $s^*$ maximisant l'accuracy sous contrainte de sensibilité :
+\[
+  s^* = \underset{s \in [0{,}05,\,0{,}95]}{\arg\max}\;\text{Acc}(s)
+  \quad \text{sous contrainte : } \text{Sensibilité}(s) \geq 80\,\%
+\]
+
+\subsection{Résultats comparatifs}
+
+\begin{table}[H]
+\centering
+\caption{Performances sur CBIS-DDSM ($224\times224$, seuil par défaut 0,50).}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Modèle} & \textbf{Acc.} & \textbf{Sensib.} & \textbf{Spécif.} & \textbf{FN (cancers)} \\
+\midrule
+MLP [2048,1024,512,256] ReLU & 57{,}9\,\% & 64{,}6\,\% & 53{,}7\,\% & 52 / 147 \\
+CNN from scratch             & 61{,}9\,\% & 39{,}5\,\% & 76{,}2\,\% & 89 / 147 \\
+ResNet18 transfer            & \textbf{65{,}9\,\%} & 72{,}8\,\% & 61{,}5\,\% & 40 / 147 \\
+\bottomrule
+\end{tabular}
+\label{tab:ddsm}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Résultats après calibration du seuil (sensibilité cible $\geq 80\,\%$).}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Modèle} & \textbf{Seuil} & \textbf{Sensib.} & \textbf{Spécif.} & \textbf{FN réduits} \\
+\midrule
+MLP   & 0{,}38 & 84{,}4\,\% & 33{,}8\,\% & 23 / 147 \\
+CNN   & 0{,}34 & 83{,}7\,\% & 26{,}8\,\% & 24 / 147 \\
+ResNet18 & \textbf{0{,}42} & 81{,}6\,\% & 52{,}4\,\% & 27 / 147 \\
+\bottomrule
+\end{tabular}
+\label{tab:ddsm_cal}
+\end{table}
+
+\textbf{Observation clinique :} ResNet18 avec seuil calibré atteint 81{,}6\,\% de sensibilité
+avec une spécificité de 52{,}4\,\% — le meilleur équilibre.
+À titre de comparaison, la littérature cite ResNet-50 à 85--88\,\% sur des datasets
+bien plus larges ($\geq 5\,000$ images avec augmentation massive).
+
+\subsection{Étude d'ablation}
+\label{sec:ablation}
+
+\subsubsection*{Protocole}
+
+5 variantes du même CNN sont entraînées sur CBIS-DDSM ($128\times128$, 25 époques),
+chacune activant une technique supplémentaire. L'initialisation de Kaiming et l'augmentation
+médicale sont communes à toutes les configurations.
+
+\subsubsection*{Résultats et analyse}
+
+\begin{table}[H]
+\centering
+\caption{Étude d'ablation (CBIS-DDSM $128\times128$, batch physique=8, effectif=32).}
+\begin{tabular}{lccccrr}
+\toprule
+\textbf{Config.} & \textbf{BN} & \textbf{Drop.} & \textbf{WD} & \textbf{Perte} &
+\textbf{Acc.} & \textbf{$\mathcal{L}_{\text{init}}$} \\
+\midrule
+1. Baseline (aucune régul.)   & $\times$ & $\times$ & 0       & CE  & \textbf{63{,}8\,\%} & 0{,}95 \\
+2. + BatchNorm                & \checkmark & $\times$ & 0     & CE  & 57{,}7\,\% & 31{,}6 \\
+3. + Dropout seul             & $\times$ & \checkmark & 0     & CE  & 51{,}6\,\% & 1{,}79 \\
+4. + BN + Dropout + WD        & \checkmark & \checkmark & $10^{-4}$ & CE & 58{,}7\,\% & 70{,}2 \\
+5. Complet avec BCE           & \checkmark & \checkmark & $10^{-4}$ & BCE & 47{,}9\,\% & 63{,}9 \\
+\bottomrule
+\end{tabular}
+\label{tab:ablation}
+\end{table}
+
+\paragraph{Analyse.}
+
+\textbf{(1) Le baseline gagne (63{,}8\,\%)} — avec $1\,318$ images et 25 époques,
+le réseau n'a pas le temps de sur-apprendre. La régularisation n'a pas d'overfitting
+à corriger ; elle ralentit simplement la convergence.
+
+\textbf{(2) BatchNorm instable (perte initiale $31{,}6$)} — BN normalise par statistiques
+de mini-batch :
+\[
+  \hat{x}_i = \frac{x_i - \mu_\mathcal{B}}{\sqrt{\sigma_\mathcal{B}^2 + \varepsilon}}
+\]
+Avec seulement 8 images, $\mu_\mathcal{B}$ et $\sigma_\mathcal{B}^2$ sont des estimations
+très bruitées. La perte démarre à $31{,}6$ au lieu de $\sim0{,}7$ pour un réseau correctement
+conditionné. \textit{Note :} l'accumulation de gradients (batch effectif $= 32$) ne résout
+\textbf{pas} ce problème — BN calcule ses statistiques sur le batch physique.
+
+\textbf{(3) Dropout seul cause du sous-apprentissage} — sans BN pour stabiliser
+les activations, Dropout(0.5) coupe 50\,\% des connexions à chaque forward pass.
+Le gradient moyen reçu par chaque poids est divisé par deux,
+insuffisant avec 1\,318 images et batch de 8. Early stopping à l'époque 8.
+
+\textbf{(4) Bug identifié — weight decay sur les paramètres BN} — dans les configs 4 et 5,
+\texttt{Adam(model.parameters(), weight\_decay=$10^{-4}$)} appliquait la pénalité L2
+aux paramètres $\gamma$ et $\beta$ de BatchNorm. Or $\gamma$ régularisé par L2 tend vers 0,
+supprimant progressivement la normalisation. Ce bug est désormais corrigé en utilisant
+deux groupes de paramètres (BN exclus du weight decay).
+
+\textbf{(5) BCE sous le hasard (47{,}9\,\%)} — l'instabilité BN + le \texttt{pos\_weight}
+pousse le modèle vers une solution dégénérée : prédire ``Malin'' par défaut
+(sensibilité 66\,\% mais spécificité 36\,\%).
+
+\subsubsection*{Perspectives d'amélioration}
+
+Deux techniques adressent directement les causes d'instabilité identifiées dans l'ablation.
+
+\textbf{1 — BN à momentum faible ($m = 0{,}01$) :}
+\[
+  \mu_{\text{run}} \leftarrow (1-m)\,\mu_{\text{run}} + m\,\mu_\mathcal{B}
+\]
+Avec $m = 0{,}01$ (au lieu de $m = 0{,}1$ par défaut), les running stats convergent
+lentement : 100 batches pour converger à 63\,\% au lieu de 10 batches.
+Cela rend BN robuste aux petits batches en ne surpondérant pas les statistiques
+instantanées bruitées.
+
+\textbf{2 — MixUp ($\alpha = 0{,}4$) :}
+\[
+  \tilde{x} = \lambda\,x_i + (1-\lambda)\,x_j, \quad
+  \tilde{y} = \lambda\,y_i + (1-\lambda)\,y_j, \quad
+  \lambda \sim \mathrm{Beta}(0{,}4,\,0{,}4)
+\]
+Force la surface de décision à être linéaire \emph{entre} les exemples d'entraînement.
+Régularise via les données (pas via l'architecture), sans perturber les gradients.
+La perte MixUp est :
+$\mathcal{L} = \lambda\,\mathcal{L}(f(\tilde{x}), y_i) + (1-\lambda)\,\mathcal{L}(f(\tilde{x}), y_j)$
+
+\begin{table}[H]
+\centering
+\caption{Perspectives — configurations 6 et 7 (CBIS-DDSM $128\times128$, 25 époques).
+         Ces deux configurations corrigent l'instabilité BN identifiée en section~\ref{sec:ablation}.}
+\small
+\begin{tabular}{lccp{4.5cm}c}
+\toprule
+\textbf{Config.} & \textbf{BN mom.} & \textbf{MixUp} & \textbf{Objectif} & \textbf{Acc.} \\
+\midrule
+4. Référence (BN+Drop+WD)              & 0{,}10 & Non & Baseline régularisé & 59{,}5\,\% \\
+6. + BN momentum $= 0{,}01$            & 0{,}01 & Non & Stabiliser stats.\ BN small batch & 60{,}3\,\% \\
+7. + BN $m{=}0{,}01$ + MixUp $\alpha{=}0{,}4$ & 0{,}01 & Oui & Régularisation combinée & 51{,}6\,\% \\
+\bottomrule
+\end{tabular}
+\label{tab:perspectives}
+\end{table}
+
+\noindent\textbf{Résultats obtenus.}
+La config~6 atteint $60{,}3\,\%$ (vs $59{,}5\,\%$ pour la config~4), gain marginal :
+le momentum réduit ne résout pas l'instabilité fondamentale — la perte initiale
+reste $\times 75$ (config~6~: $75{,}3$ vs config~4~: $73{,}2$).
+La config~7 ($51{,}6\,\%$) est la moins performante en accuracy, mais c'est la deuxième
+configuration la plus équilibrée (sensibilité~$40{,}1\,\%$, spécificité~$58{,}9\,\%$)
+après la baseline~1 — MixUp régularise effectivement la surface de décision.
+La conclusion est que le problème de fond reste le batch physique de~8 : aucune
+technique appliquée à BN seul ne suffit tant que cette contrainte n'est pas levée.
+
+% ============================================================
+\section{Conclusion et synthèse}
+% ============================================================
+
+Ce projet illustre comment la complexité des données impose des choix architecturaux
+et mathématiques de plus en plus sophistiqués.
+
+\begin{table}[H]
+\centering
+\caption{Synthèse des trois parties.}
+\small
+\begin{tabular}{lp{3.2cm}p{3.2cm}p{3cm}c}
+\toprule
+\textbf{Dataset} & \textbf{Contrainte principale} & \textbf{Solution clé} & \textbf{Meilleur modèle} & \textbf{Acc.} \\
+\midrule
+MNIST     & Classification simple & MLP H=2 sigmoid & MLP [64,32] sigmoid & 96{,}9\,\% \\
+CIFAR-10  & Invariance spatiale   & Convolutions    & CNN 4 blocs         & 80{,}8\,\% \\
+CBIS-DDSM & Petit dataset, FN critiques & Transfer + calibration & ResNet18 & 65{,}9\,\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Leçons mathématiques transversales :}
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{L'architecture doit correspondre à la structure des données.}
+        Les convolutions exploitent la localité spatiale — un MLP sur CIFAR-10 perd
+        toute information de position relative des pixels.
+  \item \textbf{La régularisation n'est bénéfique qu'en présence d'overfitting.}
+        Sur $1\,318$ images en 25 époques, le Dropout et le BN nuisent à la convergence
+        car il n'y a pas encore de sur-apprentissage à corriger.
+  \item \textbf{BatchNorm requiert des batches physiques $\geq 32$.}
+        L'accumulation de gradients simule un grand batch pour les gradients mais pas
+        pour les statistiques de normalisation — un piège fréquent en pratique.
+  \item \textbf{Le seuil de décision est un paramètre du modèle, pas une constante.}
+        En médecine, calibrer le seuil permet de passer de 40\,\% à 84\,\% de sensibilité
+        au prix d'une baisse de spécificité — un compromis explicite et maîtrisé.
+  \item \textbf{Le transfer learning compense le manque de données.}
+        ResNet18 pré-entraîné sur ImageNet apporte des features universelles
+        (bords, textures) qui restent pertinentes même en imagerie médicale.
+\end{enumerate}
+
+% ============================================================
+\clearpage
+\section*{Annexes — Figures}
+% ============================================================
+\addcontentsline{toc}{section}{Annexes}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.55\textwidth]{sorties/mnist/convergence.png}
+    \caption{Convergence de la log-loss sur l'ensemble d'entraînement MNIST (3 modèles).}
+    \label{fig:mnist_conv}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.55\textwidth]{sorties/mnist/acp.png}
+    \caption{Projection ACP 2D des données MNIST.
+             Les classes 0 et 1 sont bien séparées ;
+             les paires (3,8), (4,9) se chevauchent, expliquant les erreurs résiduelles.}
+    \label{fig:mnist_acp}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{sorties/mnist/erreurs_communes.png}
+    \caption{Exemples de chiffres ambigus mal classés simultanément par les trois modèles.}
+    \label{fig:mnist_erreurs}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{sorties/cifar/filtres_convolution.png}
+    \caption{Effet des 6 filtres K1--K6 sur une image en niveaux de gris.
+             De gauche à droite : original, flou, netteté, bords horizontaux,
+             bords verticaux, Sobel, diagonal.}
+    \label{fig:filtres}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{sorties/cifar/convergence.png}
+    \caption{Convergence train/validation du CNN PyTorch sur CIFAR-10.}
+    \label{fig:cifar_conv}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{sorties/cifar/acp.png}
+    \caption{Projection ACP 2D de CIFAR-10. Le chevauchement important entre toutes les classes
+             illustre pourquoi les modèles linéaires et MLP peinent sur ce dataset.}
+    \label{fig:cifar_acp}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{sorties/ddsm/mlp_confusion_05.png}
+        \caption{MLP — seuil 0,5 (sensi. 64,6\,\%)}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{sorties/ddsm/mlp_confusion_cal.png}
+        \caption{MLP — seuil calibré 0,38 (sensi. 84,4\,\%)}
+    \end{subfigure}
+    \caption{Matrices de confusion du MLP sur CBIS-DDSM.}
+    \label{fig:ddsm_mlp}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{sorties/ddsm/cnn_confusion_05.png}
+        \caption{CNN from scratch — seuil 0,5}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{sorties/ddsm/resnet_confusion_cal.png}
+        \caption{ResNet18 — seuil calibré 0,42}
+    \end{subfigure}
+    \caption{Matrices de confusion CNN et ResNet18 sur CBIS-DDSM.}
+    \label{fig:ddsm_cnn}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{sorties/ddsm/ablation_train_convergence.png}
+        \caption{Perte entraînement}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{sorties/ddsm/ablation_val_convergence.png}
+        \caption{Perte validation}
+    \end{subfigure}
+    \caption{Ablation study — convergence des 7 configurations sur CBIS-DDSM ($128\times128$).
+             La config~2 (BN seul) montre l'instabilité liée au batch physique de 8.
+             Les configs~6 et~7 (perspectives) devraient montrer une perte initiale plus stable.}
+    \label{fig:ablation}
+\end{figure}
+
+\end{document}

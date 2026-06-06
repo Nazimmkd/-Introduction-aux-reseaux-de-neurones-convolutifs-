@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environnement virtuel
+.venv/
+
+# Données volumineuses (non versionnées)
+data_models/
+CBIS-DDSM/jpeg/
+IMAGES/
+
+# Sorties générées (figures, modèles entraînés)
+sorties/
+
+# Artefacts LaTeX
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.synctex\(busy\)
+out/
+
+# Outils locaux
+.claude/
+
+# IDE
+.idea/
