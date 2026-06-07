@@ -112,6 +112,15 @@ def compter_params(couches):
 def fmt_n(n): return f"{n:,}".replace(",", " ")
 
 
+# ReLU produit des gradients non bornés (dérivée = 0 ou 1) → SGD instable à LR élevé.
+# Ce facteur réduit le LR d'un ordre de grandeur par rapport à sigmoid/tanh.
+LR_RELU_FACTOR = 0.1
+
+def _lr_act(base_lr, activation):
+    """Retourne base_lr × LR_RELU_FACTOR si activation='relu', sinon base_lr."""
+    return base_lr * LR_RELU_FACTOR if activation == "relu" else base_lr
+
+
 def metriques_cm(cm):
     """Retourne (acc, sens, spec, FN, FP) depuis une matrice de confusion 2x2."""
     TN, FP, FN, TP = int(cm[0, 0]), int(cm[0, 1]), int(cm[1, 0]), int(cm[1, 1])
@@ -226,7 +235,7 @@ try:
             _p, _hist = train_model(
                 X_tr_mn, Y_tr_mn, "mlp",
                 couches_cachees=[_h], activation="relu",
-                lr=0.1, iters=100, batch_size=256)
+                lr=_lr_act(0.1, "relu"), iters=100, batch_size=256)
             sauver_pt(_path, params=_p, hist=_hist)
         fixer_seeds()
         _, _at = evaluer_modele(X_tr_mn, y_tr_mn, _p, "mlp", activation="relu")
@@ -251,7 +260,7 @@ try:
             _p, _hist = train_model(
                 X_tr_mn, Y_tr_mn, "mlp",
                 couches_cachees=_hl, activation="relu",
-                lr=0.1, iters=100, batch_size=256)
+                lr=_lr_act(0.1, "relu"), iters=100, batch_size=256)
             sauver_pt(_path, params=_p, hist=_hist)
         fixer_seeds()
         _, _at = evaluer_modele(X_tr_mn, y_tr_mn, _p, "mlp", activation="relu")
@@ -276,7 +285,7 @@ try:
                 try:
                     _pg, _ = train_model(X_tr_mn, Y_tr_mn, "mlp",
                                          couches_cachees=_arch, activation=_act,
-                                         lr=0.1, iters=50, batch_size=256)
+                                         lr=_lr_act(0.1, _act), iters=50, batch_size=256)
                     _, _acc = evaluer_modele(X_te_mn, y_te_mn, _pg, "mlp", activation=_act)
                     mn_grille[(_act, _anm)] = _acc
                     print(f"    {_act:10s} x {_anm:15s} -> {_acc*100:.2f}%")
@@ -441,13 +450,13 @@ try:
     # -- S2.2 MLP / Lineaire --------------------------------------------
     print("\n[2.2] Modeles MLP/Lineaire CIFAR-10...")
     _cfgs_mlp = [
-        ("Lin.Gris",            "linear", [],        "relu",    "Gris",    X_tr_gf,  X_te_gf,  0.10, 512),
-        ("MLP128relu.Gris",     "mlp",    [128],     "relu",    "Gris",    X_tr_gf,  X_te_gf,  0.10, 512),
-        ("MLP256relu.Gris",     "mlp",    [256],     "relu",    "Gris",    X_tr_gf,  X_te_gf,  0.10, 512),
-        ("Lin.Coul",            "linear", [],        "relu",    "Couleur", X_tr_cf2, X_te_cf2, 0.01, 512),
-        ("MLP128relu.Coul",     "mlp",    [128],     "relu",    "Couleur", X_tr_cf2, X_te_cf2, 0.05, 512),
-        ("MLP256relu.Coul",     "mlp",    [256],     "relu",    "Couleur", X_tr_cf2, X_te_cf2, 0.05, 512),
-        ("MLP256-128relu.Coul", "mlp",    [256, 128],"relu",    "Couleur", X_tr_cf2, X_te_cf2, 0.01, 512),
+        ("Lin.Gris",            "linear", [],        "relu",    "Gris",    X_tr_gf,  X_te_gf,  0.10,  512),
+        ("MLP128relu.Gris",     "mlp",    [128],     "relu",    "Gris",    X_tr_gf,  X_te_gf,  0.01,  512),
+        ("MLP256relu.Gris",     "mlp",    [256],     "relu",    "Gris",    X_tr_gf,  X_te_gf,  0.01,  512),
+        ("Lin.Coul",            "linear", [],        "relu",    "Couleur", X_tr_cf2, X_te_cf2,  0.01,  512),
+        ("MLP128relu.Coul",     "mlp",    [128],     "relu",    "Couleur", X_tr_cf2, X_te_cf2,  0.005, 512),
+        ("MLP256relu.Coul",     "mlp",    [256],     "relu",    "Couleur", X_tr_cf2, X_te_cf2,  0.005, 512),
+        ("MLP256-128relu.Coul", "mlp",    [256, 128],"relu",    "Couleur", X_tr_cf2, X_te_cf2,  0.001, 512),
     ]
     for _slug, _type, _cc, _act, _don, _Xtr, _Xte, _lr, _bs in _cfgs_mlp:
         _path = mdl(f"cifar_{_slug}.pt")
@@ -521,7 +530,7 @@ try:
                 try:
                     _pg, _ = train_model(_Xtr_cpu, _Ytr_cpu, "mlp",
                                          couches_cachees=_arch, activation=_act,
-                                         lr=0.01, iters=50, batch_size=512)
+                                         lr=_lr_act(0.01, _act), iters=50, batch_size=512)
                     _, _acc = evaluer_modele(X_te_cf2, y_te_cf, _pg, "mlp", activation=_act)
                     cf_grille[(_act, _anm)] = _acc
                     print(f"    {_act:10s} x {_anm:15s} -> {_acc*100:.2f}%")
